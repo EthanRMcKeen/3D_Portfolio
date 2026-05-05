@@ -2,5 +2,5 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: process.env.NODE_ENV === 'production' ? '/3D_portfolio/' : '/',
+  base: process.env.NODE_ENV === 'production' ? '/3D_Portfolio/' : '/',
 })
