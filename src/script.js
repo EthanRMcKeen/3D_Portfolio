@@ -6,24 +6,32 @@ import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRe
 
 import HolographicMaterial from './HolographicMaterialVanilla.js';
 
+import Stats from 'https://cdnjs.cloudflare.com/ajax/libs/stats.js/r17/Stats.min.js';
+
 // ── Scene ──────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a0f);
 scene.fog = new THREE.FogExp2(0x0a0a0f, 0.04);
 
-// A separate scene for CSS3D objects (they don't live in the WebGL scene)
 const cssScene = new THREE.Scene();
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
-camera.position.set(0, 1.9, -0.14);
+camera.position.set(0, 1.85, -0.14);
+camera.rotation.set(0, Math.PI, 0);
 camera.rotation.order = 'YXZ';
 
 // ── WebGL Renderer ─────────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+// PERF: antialias false — biggest single win; avoids multi-sample rendering
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PERF: Cap pixel ratio at 1 — on Retina screens this cuts rendered pixels
+//       significantly vs the original 1.5 cap. Raise to 1.5 if too soft.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+
+// PERF: Shadows disabled — no meshes cast shadows (all castShadow = false)
+//       Also eliminates the depth-texture WebGL warning
+renderer.shadowMap.enabled = false;
+
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
@@ -35,18 +43,18 @@ cssRenderer.setSize(window.innerWidth, window.innerHeight);
 cssRenderer.domElement.style.position = 'fixed';
 cssRenderer.domElement.style.top = '0';
 cssRenderer.domElement.style.left = '0';
-cssRenderer.domElement.style.pointerEvents = 'none'; // let WebGL handle raycasting; panels set their own pointer-events
+cssRenderer.domElement.style.pointerEvents = 'none';
 document.body.appendChild(cssRenderer.domElement);
 
 // ── Lighting ───────────────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0x334466, 3));
-const fillLight = new THREE.DirectionalLight(0x4477aa, 2.5);
-fillLight.position.set(-4, 2, -3);
+scene.add(new THREE.AmbientLight(0x76afe8, 3));
+const fillLight = new THREE.DirectionalLight(0xffc054, 2.5);
+fillLight.position.set(-4, 2, 3);
 scene.add(fillLight);
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-dirLight.position.set(5, 10, 5);
-dirLight.castShadow = true;
-scene.add(dirLight);
+
+const fillLight2 = new THREE.DirectionalLight(0x36fff5, 2.5);
+fillLight2.position.set(-4, -1, -3);
+scene.add(fillLight2);
 
 // ── Grid ───────────────────────────────────────────────────────────────────
 scene.add(new THREE.GridHelper(20, 40, 0x1a2a4a, 0x0d1520));
@@ -66,7 +74,8 @@ const title_geometry = new TextGeometry('ETHAN  MCKEEN', {
   font: font,
   size: 10,
   depth: 2,
-  curveSegments: 12
+  // PERF: Reduced curveSegments 6 → 4; cuts text mesh complexity, barely visible
+  curveSegments: 4,
 });
 
 const font_arial = await text_loader.loadAsync('fonts/Ubuntu.json');
@@ -74,7 +83,7 @@ const subtitle_geometry = new TextGeometry('Electrical & Computer Engineer | Mac
   font: font_arial,
   size: 7,
   depth: 2,
-  curveSegments: 12
+  curveSegments: 4,
 });
 
 const holographicMaterial = new HolographicMaterial();
@@ -94,13 +103,8 @@ scene.add(titleMesh);
 scene.add(subtitleMesh);
 
 // ── CSS3D Panel Setup ──────────────────────────────────────────────────────
-// CSS3DObject positions are in CSS pixel units scaled by a factor.
-// We use a scale of 1/500 to map CSS pixels → Three.js world units.
-// A 300px-wide panel at scale 1/500 = 0.6 world units wide.
 const CSS3D_SCALE = 1 / 500;
 
-// Panel world-space transforms — position (x,y,z) and rotation (rx,ry,rz in radians)
-// These put the panels floating in the environment around BT-1's cockpit area.
 const PANEL_TRANSFORMS = {
   'panel-left': {
     position: new THREE.Vector3(0.5, 1.4, 1.5),
@@ -124,25 +128,23 @@ const PANEL_TRANSFORMS = {
   },
 };
 
-// Track CSS3DObjects so we can animate them
 const css3dObjects = {};
 
-// Detail containers also get CSS3D objects (hidden initially in world space)
 const DETAIL_TRANSFORMS = {
   'detail-panel-left': {
-    position: new THREE.Vector3(0.05, 1.6, -0.1),       
-    rotation: new THREE.Euler(0, 0.1 * Math.PI, 0),
+    position: new THREE.Vector3(0.3, 1.6, -0.5),
+    rotation: new THREE.Euler(0, 0.1, 0),
   },
   'detail-panel-01': {
-    position: new THREE.Vector3(-0.25, 1.41, 1.52),   
+    position: new THREE.Vector3(-0.25, 1.41, 1.52),
     rotation: new THREE.Euler(0, Math.PI, 0),
   },
   'detail-panel-02': {
-    position: new THREE.Vector3(-0.7, 1.41, 1.5),     
+    position: new THREE.Vector3(-0.7, 1.41, 1.5),
     rotation: new THREE.Euler(0, -1.05 * Math.PI, 0),
   },
   'detail-panel-03': {
-    position: new THREE.Vector3(-0.25, 1.41, 1.52),   
+    position: new THREE.Vector3(-0.25, 1.41, 1.52),
     rotation: new THREE.Euler(0, Math.PI, 0),
   },
   'detail-panel-04': {
@@ -151,14 +153,11 @@ const DETAIL_TRANSFORMS = {
   },
 };
 
-// Remove the old flat HUD div from document flow — we'll drive all panels via CSS3D
-// Keep the #hud div in the DOM but make it invisible (CSS3DObjects reference its children)
 const hudEl = document.getElementById('hud');
-//hudEl.style.display = 'none';
 
-// Helper: wrap a DOM element in a CSS3DObject and add to cssScene
 function makeCss3dPanel(el, transform) {
-  el.style.display = 'block'; // ensure visible for CSS3DRenderer
+  // Don't set display here — detail containers need 'flex', panels need 'block'.
+  // Callers set display themselves before calling this function.
   el.style.pointerEvents = 'auto';
 
   const obj = new CSS3DObject(el);
@@ -170,21 +169,20 @@ function makeCss3dPanel(el, transform) {
   return obj;
 }
 
-// Build CSS3D objects for all main panels
 document.querySelectorAll('.panel[data-panel]').forEach(panel => {
   const id = panel.id;
   const transform = PANEL_TRANSFORMS[id];
   if (!transform) return;
+  panel.style.display = 'block';
   const obj = makeCss3dPanel(panel, transform);
   css3dObjects[id] = obj;
 });
 
-// Build CSS3D objects for all detail views (start them hidden)
 document.querySelectorAll('.detail-container').forEach(detail => {
   const id = detail.id;
   const transform = DETAIL_TRANSFORMS[id];
   if (!transform) return;
-  detail.classList.remove('hud-hidden');   // ← ADD THIS
+  detail.classList.remove('hud-hidden');
   detail.style.display = 'flex';
   detail.style.opacity = '0';
   detail.style.pointerEvents = 'none';
@@ -211,24 +209,24 @@ const STATES = {
     pitchOffset: 0.02 * Math.PI,
   },
   'focus-panel-01': {
-    position:  new THREE.Vector3(0.4, 1.7, 0.45),
-    yawOffset: -0.08 * Math.PI,
+    position:  new THREE.Vector3(0.4, 1.8, 1.45),
+    yawOffset: 0.08 * Math.PI,
     pitchOffset: -0.04 * Math.PI,
   },
   'focus-panel-02': {
-    position:  new THREE.Vector3(0.55, 1.45, 0.35),
-    yawOffset: -0.1 * Math.PI,
-    pitchOffset: 0.06 * Math.PI,
+    position:  new THREE.Vector3(0.55, 1.1, 1.2),
+    yawOffset: 0.2 * Math.PI,
+    pitchOffset: 0.15 * Math.PI,
   },
   'focus-panel-03': {
-    position:  new THREE.Vector3(0.4, 1.2, 0.5),
-    yawOffset: -0.08 * Math.PI,
-    pitchOffset: 0.14 * Math.PI,
+    position:  new THREE.Vector3(-0.4, 1.55, 1.2),
+    yawOffset: -0.2 * Math.PI,
+    pitchOffset: 0.12 * Math.PI,
   },
   'focus-panel-04': {
-    position:  new THREE.Vector3(-0.4, 1.7, 0.45),
-    yawOffset: 0.08 * Math.PI,
-    pitchOffset: -0.04 * Math.PI,
+    position:  new THREE.Vector3(-1, 1.97, -1.2),
+    yawOffset: -0.8 * Math.PI,
+    pitchOffset: -0.07 * Math.PI,
   },
 };
 
@@ -244,7 +242,6 @@ let currentYaw  = Math.PI, currentPitch = 0;
 const LOOK_RANGE = Math.PI / 6;
 let mouseOffsetX = 0, mouseOffsetY = 0;
 
-// ── Animation state flags ──────────────────────────────────────────────────
 let isAnimating = false;
 let mixer = null;
 let gltf  = null;
@@ -296,7 +293,6 @@ function transitionTo(stateName, panelId) {
   if (stateName === 'COLLAPSE') {
     activePanel = panelId;
 
-    // Animate panels collapsing
     document.querySelectorAll('.panel[data-panel]').forEach(p => p.classList.add('collapsing'));
 
     if (mixer && gltf?.animations?.length) {
@@ -315,6 +311,8 @@ function transitionTo(stateName, panelId) {
     showMainPanels(false);
     showDetailPanel(activePanel, true);
 
+    // PERF: model2 only added to the scene graph when actually needed (focus state),
+    //       keeping it out of draw calls entirely during the default view
     if (model2Loaded && model2) {
       if (!model2.parent) scene.add(model2);
       model2Timer = setTimeout(() => { model2.visible = true; }, 100);
@@ -328,13 +326,16 @@ function transitionTo(stateName, panelId) {
     clearTimeout(collapseTimer);
     clearTimeout(model2Timer);
 
-    // Hide any open detail
     if (activePanel) showDetailPanel(activePanel, false);
     activePanel = null;
 
-    if (model2) model2.visible = false;
+    // PERF: Remove model2 from scene graph when returning to default —
+    //       not just hidden, fully removed so it costs zero draw calls
+    if (model2) {
+      model2.visible = false;
+      if (model2.parent) scene.remove(model2);
+    }
 
-    // Restore main panels
     document.querySelectorAll('.panel[data-panel]').forEach(p => p.classList.remove('collapsing'));
     showMainPanels(true);
 
@@ -358,6 +359,7 @@ document.querySelectorAll('.panel[data-panel]').forEach(panel => {
 });
 
 // ── Mouse look ─────────────────────────────────────────────────────────────
+// PERF: mouseDirty throttle — only one mousemove processed per animation frame
 let mouseDirty = false;
 window.addEventListener('mousemove', e => {
   if (mouseDirty) return;
@@ -388,9 +390,40 @@ function updateCamera() {
   camera.rotation.x = currentPitch;
 }
 
+// ── Texture downscaler ─────────────────────────────────────────────────────
+// Walks a loaded GLTF scene and downgrades all material textures.
+// - Disables mipmap generation (saves VRAM and upload time)
+// - Downscales any image larger than MAX_TEXTURE_SIZE before GPU upload
+function degradeGltfTextures(gltfScene, maxTextureSize = 512) {
+  gltfScene.traverse(node => {
+    if (!node.isMesh || !node.material) return;
+    const slots = [
+      'map', 'normalMap', 'roughnessMap', 'metalnessMap',
+      'aoMap', 'emissiveMap', 'lightMap', 'envMap',
+    ];
+    slots.forEach(slot => {
+      const tex = node.material[slot];
+      if (!tex) return;
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      if (tex.image && (tex.image.width > maxTextureSize || tex.image.height > maxTextureSize)) {
+        const canvas = document.createElement('canvas');
+        const scale = maxTextureSize / Math.max(tex.image.width, tex.image.height);
+        canvas.width  = Math.floor(tex.image.width  * scale);
+        canvas.height = Math.floor(tex.image.height * scale);
+        canvas.getContext('2d').drawImage(tex.image, 0, 0, canvas.width, canvas.height);
+        tex.image = canvas;
+        tex.needsUpdate = true;
+      }
+    });
+  });
+}
+
 // ── GLTF Loaders ──────────────────────────────────────────────────────────
 const loader = new GLTFLoader();
-const clock  = new THREE.Clock();
+
+// PERF: Use THREE.Timer instead of deprecated THREE.Clock
+const clock = new THREE.Timer();
 
 loader.load(
   './models/bt/bt.gltf',
@@ -402,8 +435,10 @@ loader.load(
     model.traverse(node => {
       if (!node.isMesh) return;
       node.castShadow    = false;
-      node.receiveShadow = true;
+      node.receiveShadow = false; // PERF: shadow map disabled, skip receiver pass
+      node.frustumCulled = true;  // PERF: skip off-screen geometry draw calls
     });
+    //degradeGltfTextures(model, 1024);   // PERF: downscale textures before GPU upload
     scene.add(model);
 
     if (gltf.animations?.length) {
@@ -431,31 +466,68 @@ loader.load(
     model.traverse(node => {
       if (!node.isMesh) return;
       node.castShadow    = false;
-      node.receiveShadow = true;
+      node.receiveShadow = false; // PERF: shadow map disabled
+      node.frustumCulled = true;
+      // PERF: pilot is statically positioned — disable per-frame matrix recalculation
+      node.matrixAutoUpdate = false;
+      node.updateMatrix();
     });
+    //degradeGltfTextures(model, 1024);   // PERF: downscale textures before GPU upload
     model2 = model;
     model2Loaded = true;
+    // PERF: intentionally NOT added to scene here — only added on demand in focus state
+    //       so it contributes zero draw calls during the default view
   },
   xhr => console.log('Model 2: ' + (xhr.loaded / xhr.total * 100).toFixed(1) + '% loaded'),
   err => console.error('Error loading model 2:', err)
 );
 
 // ── Initial panel state ────────────────────────────────────────────────────
-// Main panels visible, detail panels hidden
 showMainPanels(true);
 document.querySelectorAll('.detail-container').forEach(el => {
   const obj = css3dObjects[el.id];
   if (obj) obj.visible = false;
 });
 
+// ── CSS3D render throttle ──────────────────────────────────────────────────
+// PERF: CSS3D panels are static HTML — no need to composite them at 60fps.
+//       Throttle to every 2nd frame (~30fps). WebGL still renders at full rate.
+//       Using 2 instead of 3 keeps panel visibility transitions feeling snappy.
+let cssFrameCount = 0;
+const CSS_RENDER_EVERY = 2;
+
 // ── Render loop ────────────────────────────────────────────────────────────
+const stats = new Stats();
+stats.showPanel(0); // 0 = FPS, 1 = ms per frame, 2 = MB memory
+document.body.appendChild(stats.dom);
+
 function animate() {
+  stats.begin();
   requestAnimationFrame(animate);
+
+  // PERF: THREE.Timer requires .update() before .getDelta()
+  clock.update();
   const delta = clock.getDelta();
+
   if (mixer && isAnimating) mixer.update(delta);
   updateCamera();
   holographicMaterial.update();
+
   renderer.render(scene, camera);
-  cssRenderer.render(cssScene, camera);
+
+  // PERF: Re-render CSS3D panels only every 2nd frame
+  cssFrameCount++;
+  if (cssFrameCount >= CSS_RENDER_EVERY) {
+    cssRenderer.render(cssScene, camera);
+    cssFrameCount = 0;
+  }
+  stats.end();
 }
+
+// function animate() {
+//   stats.begin();
+//   requestAnimationFrame(animate);
+//   renderer.render(scene, camera);
+//   stats.end();
+// }
 animate();
